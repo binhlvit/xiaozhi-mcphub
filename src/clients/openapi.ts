@@ -2,7 +2,7 @@ import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 import SwaggerParser from '@apidevtools/swagger-parser';
 import { OpenAPIV3 } from 'openapi-types';
 import { ServerConfig, OpenAPISecurityConfig } from '../types/index.js';
-import { assertSafeUrl } from '../utils/ssrf.js';
+import { assertSafeUrl, createRedirectValidatingFetch } from '../utils/ssrf.js';
 import { getUserDao } from '../dao/index.js';
 import { sanitizeStringForLogging, createSafeJSON } from '../utils/serialization.js';
 
@@ -261,17 +261,61 @@ export class OpenAPIClient {
     return this.oauth2TokenRequest;
   }
 
+  // SwaggerParser.dereference() fetches the entry URL *and* every $ref it finds along the
+  // way (including ones nested inside a user-supplied `openapi.schema` object, and ones
+  // discovered inside a remote spec after the entry URL already passed the SSRF check).
+  // The library's own built-in "safeUrlResolver" only does string/hostname pattern matching
+  // (no DNS resolution), so it misses DNS-rebinding-style hosts, and it has no protection at
+  // all against its local filesystem resolver reading arbitrary files. Route every fetch
+  // through the same DNS-resolving assertSafeUrl guard used elsewhere in this client, and
+  // disable local file resolution entirely since this feature only supports remote specs.
+  private buildSafeResolveOptions(): SwaggerParser.Options['resolve'] {
+    const allowInternal = this.allowInternalNetworks;
+    const safeFetch = createRedirectValidatingFetch(fetch, allowInternal);
+    return {
+      file: false,
+      http: {
+        // The library's own hostname-string blocklist would run *before* read()
+        // below regardless of allowInternal, silently defeating the admin bypass
+        // for the exact hosts (127.0.0.1, localhost, RFC1918) it pattern-matches.
+        // assertSafeUrl is the single source of truth instead.
+        safeUrlResolver: false,
+        read: async (file: { url: string }): Promise<Buffer> => {
+          await assertSafeUrl(file.url, { allowInternal });
+          const response = await safeFetch(file.url);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status} fetching ${file.url}`);
+          }
+          return Buffer.from(await response.arrayBuffer());
+        },
+      },
+    };
+  }
+
   async initialize(): Promise<void> {
     try {
-      // Parse and dereference the OpenAPI specification
+      // Resolve whether this server's owner is an admin *before* fetching the spec, so the
+      // SSRF guard below covers the very first fetch too, not just later tool calls.
+      // Admin-owned servers may legitimately target internal services.
+      const ownerUser = this.config.owner
+        ? await getUserDao().findByUsername(this.config.owner)
+        : null;
+      this.allowInternalNetworks = !!ownerUser?.isAdmin;
+
+      const resolveOptions = this.buildSafeResolveOptions();
+
+      // Parse and dereference the OpenAPI specification. The entry URL goes through the
+      // same resolve.http.read as every nested $ref, so it's already covered by
+      // buildSafeResolveOptions() above — no separate pre-check needed here.
       if (this.config.openapi?.url) {
-        this.spec = (await SwaggerParser.dereference(
-          this.config.openapi.url,
-        )) as OpenAPIV3.Document;
+        this.spec = (await SwaggerParser.dereference(this.config.openapi.url, {
+          resolve: resolveOptions,
+        })) as OpenAPIV3.Document;
       } else if (this.config.openapi?.schema) {
         // For schema object, we need to pass it as a cloned object
         this.spec = (await SwaggerParser.dereference(
           JSON.parse(JSON.stringify(this.config.openapi.schema)),
+          { resolve: resolveOptions },
         )) as OpenAPIV3.Document;
       } else {
         throw new Error('Either OpenAPI URL or schema must be provided');
@@ -279,13 +323,6 @@ export class OpenAPIClient {
 
       // Update baseUrl from OpenAPI servers field
       this.updateBaseUrlFromServers();
-
-      // Resolve whether this server's owner is an admin; admin-owned servers
-      // may legitimately target internal services and skip the SSRF blocklist.
-      const ownerUser = this.config.owner
-        ? await getUserDao().findByUsername(this.config.owner)
-        : null;
-      this.allowInternalNetworks = !!ownerUser?.isAdmin;
 
       this.extractTools();
       await this.ensureOAuth2AccessToken();

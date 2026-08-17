@@ -135,7 +135,7 @@ const findProxychains4 = (): string | null => {
  * Generate a temporary proxychains4 configuration file.
  * Returns the path to the generated config file.
  */
-const generateProxychainsConfig = (
+export const generateProxychainsConfig = (
   serverName: string,
   proxyConfig: ProxychainsConfig,
 ): string | null => {
@@ -151,6 +151,15 @@ const generateProxychainsConfig = (
   // Validate required fields
   if (!proxyConfig.host || !proxyConfig.port) {
     console.warn(`[${serverName}] Proxy host and port are required for proxychains4`);
+    return null;
+  }
+
+  // SECURITY: proxy fields are written verbatim into the generated conf file below.
+  // Reject newlines so a crafted host/username/password can't inject extra proxychains
+  // directives (e.g. additional [ProxyList] entries or "localnet" bypass rules).
+  const proxyFields = [proxyConfig.host, proxyConfig.port, proxyConfig.username, proxyConfig.password];
+  if (proxyFields.some((value) => value !== undefined && /[\r\n]/.test(String(value)))) {
+    console.warn(`[${serverName}] Proxy config contains newline characters, refusing to generate proxychains4 config`);
     return null;
   }
 

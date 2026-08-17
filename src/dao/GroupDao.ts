@@ -33,7 +33,8 @@ export interface GroupDao extends BaseDao<IGroup, string> {
   updateServers(groupId: string, servers: string[] | IGroup['servers']): Promise<boolean>;
 
   /**
-   * Find group by name
+   * Find group by name, but only when the name is unambiguous across all owners.
+   * Returns null (fail closed) if zero or more than one group shares the name.
    */
   findByName(name: string): Promise<IGroup | null>;
 
@@ -237,7 +238,8 @@ export class GroupDaoImpl extends JsonFileBaseDao implements GroupDao {
 
   async findByName(name: string): Promise<IGroup | null> {
     const groups = await this.getAll();
-    return groups.find((group) => group.name === name) || null;
+    const matches = groups.filter((group) => group.name === name);
+    return matches.length === 1 ? matches[0] : null;
   }
 
   async findByOwnerAndName(owner: string, name: string): Promise<IGroup | null> {

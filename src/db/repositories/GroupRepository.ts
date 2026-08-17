@@ -27,10 +27,17 @@ export class GroupRepository {
   }
 
   /**
-   * Find group by name (first match). Prefer findByOwnerAndName when owner is known.
+   * Find group by name, but only when the name is unambiguous across all owners.
+   * Group names are only unique per-owner (see Group entity), so a bare name lookup
+   * used for authorization (bearer-key group scoping) must fail closed rather than
+   * arbitrarily pick one of several same-named groups belonging to different owners.
+   * Prefer findByOwnerAndName when the owner is known.
    */
   async findByName(name: string): Promise<Group | null> {
-    return await this.repository.findOne({ where: { name } });
+    // take: 2 is enough to detect ambiguity (>1 match) without an unbounded
+    // table scan — `name` has no standalone index, only the (owner, name) one.
+    const matches = await this.repository.find({ where: { name }, take: 2 });
+    return matches.length === 1 ? matches[0] : null;
   }
 
   /**

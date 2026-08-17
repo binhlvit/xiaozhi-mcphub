@@ -2,6 +2,7 @@
 import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
+import { jest } from '@jest/globals';
 
 export interface TestUser {
   username: string;
@@ -138,6 +139,22 @@ export const DbHelpers = {
     // TODO: Implement based on your database setup
     console.log('Seeding test data...');
   },
+};
+
+/**
+ * Override a JsonFileBaseDao-derived DAO's load/save with an in-memory bag,
+ * so DAO tests can exercise real query logic without touching disk.
+ */
+export const createMemoryJsonDao = <D extends object, S>(dao: D, initialSettings: S) => {
+  let settings = initialSettings;
+  (dao as any).loadSettings = jest.fn(async () => settings);
+  (dao as any).saveSettings = jest.fn(async (next: S) => {
+    settings = next;
+  });
+  return {
+    dao,
+    getSettings: (): S => settings,
+  };
 };
 
 /**

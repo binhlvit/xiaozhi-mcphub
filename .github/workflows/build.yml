@@ -63,8 +63,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args: |
             INSTALL_EXT=true
-          # 如果 Dockerfile 存在 'AS runtime' 阶段，则可取消注释下一行
-          # target: runtime
+          target: runtime
 
       - name: Verify pushed images
         if: ${{ github.event_name != 'pull_request' }}

@@ -1,28 +1,12 @@
-import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { beforeEach, describe, expect, it } from '@jest/globals';
 import { ServerDaoImpl } from '../../src/dao/ServerDao.js';
-
-/**
- * In-memory settings bag so ServerDaoImpl can exercise per-owner uniqueness
- * without touching disk.
- */
-const createMemoryDao = () => {
-  let settings: any = { mcpServers: {} };
-  const dao = new ServerDaoImpl();
-  (dao as any).loadSettings = jest.fn(async () => settings);
-  (dao as any).saveSettings = jest.fn(async (next: any) => {
-    settings = next;
-  });
-  return {
-    dao,
-    getSettings: () => settings,
-  };
-};
+import { createMemoryJsonDao } from '../utils/testHelpers.js';
 
 describe('ServerDao owner-scoped uniqueness', () => {
   let dao: ServerDaoImpl;
 
   beforeEach(() => {
-    ({ dao } = createMemoryDao());
+    ({ dao } = createMemoryJsonDao(new ServerDaoImpl(), { mcpServers: {} }));
   });
 
   it('allows two different owners to create servers with the same name', async () => {
