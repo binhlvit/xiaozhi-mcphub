@@ -1,41 +1,22 @@
 version: "3.8"
 
 volumes:
-  pgdata:
   appdata:
 
 services:
-  db:
-    image: pgvector/pgvector:pg16
-    container_name: pgvector
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: xiaozhi
-      POSTGRES_PASSWORD: xiaozhi123456
-      POSTGRES_DB: xiaozhi_mcphub
-    # 更安全：仅本机能连数据库；如果完全不需要宿主访问，可删掉 ports 行
-    ports:
-      - "127.0.0.1:5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U xiaozhi -d xiaozhi_mcphub -h 127.0.0.1"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-
   mcphub:
     image: huangjunsen/xiaozhi-mcphub:latest
     container_name: xiaozhi-mcphub
-    depends_on:
-      db:
-        condition: service_healthy
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
-      # 设置 DB_URL 即自动启用数据库模式；小智端点功能依赖数据库
-      DB_URL: "postgres://xiaozhi:xiaozhi123456@db:5432/xiaozhi_mcphub"
+      # Pre-existing Postgres — no `db` container here. The instance needs the
+      # pgvector extension available (CREATE EXTENSION IF NOT EXISTS vector runs
+      # automatically on startup, but the extension must already be installed on
+      # the Postgres server itself). Setting DB_URL alone enables database mode.
+      # Value comes from the .env file (untracked) next to this compose file.
+      DB_URL: "${DB_URL}"
       NODE_ENV: production
       SMART_ROUTING_ENABLED: "false"
       # 生产建议开启：
